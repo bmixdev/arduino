@@ -13,10 +13,12 @@
 #define PIN_TRIG 6
 #define PIN_ECHO 7
 #define MAX_DISTANCE 300 // Константа для определения максимального расстояния, которое мы будем считать корректным.
-#define MIN_DISTANCE 30 
+#define MIN_DISTANCE 20 
 
+#define DELAY_SONAR 50
 
 #define dSonar 2
+
 
 //create a motorR instance
 L298N motorR(ENA, IN1, IN2);
@@ -39,6 +41,12 @@ byte index = 0; // Index into array; where to store the character
 int oldSpeed = -1;
 char curVector = '0';
 
+int m = 1; // масса робота 1 кг
+int g = 9.8; // ускорение свободного падения
+int sTorm;
+int curDist = 1000; //текушая дистанция
+int curSTorm = 0; // длина тормозного пути
+
 void setup() {
 
   //used for display information
@@ -51,6 +59,9 @@ void setup() {
   digitalWrite(LED, HIGH);
   Serial.setTimeout(10);
   Serial.println("Для вызова инструкции нажмите H");
+
+      Serial.print("0 curSpeed: "); Serial.println(curSpeed);
+      
 }
 
 void printHelp() {
@@ -75,11 +86,14 @@ void setSpeed() {
 }
 
 void mF() {
-      setSpeed();
-      Serial.println("Motor forward");
-      motorR.forward();
-      motorL.forward();
-      curVector = 'F';
+      if ((curDist * 3) <= curSTorm) mStop;
+      else {
+        setSpeed();
+        Serial.println("Motor forward");
+        motorR.forward();
+        motorL.forward();
+        curVector = 'F';
+      }
 }
 
 void mB() {
@@ -144,38 +158,72 @@ void policeTurn(int v) {
   curTurnDelay = tmpTurnDelay;
 }
 
+// вычисление тормозного пути
+int getSTorm() {
+  sTorm = ((curSpeed^2)/(m*g)) *2.5;
+  return sTorm;
+}
+
 void checkSonar() {
   // Стартовая задержка, необходимая для корректной работы.
-  delay(50);
+  delay(DELAY_SONAR);
   // Получаем значение от датчика расстояния и сохраняем его в переменную
-  unsigned int distance = sonar.ping_cm();
+  // unsigned int distance = sonar.ping_cm();
+  curDist = sonar.ping_cm();
   // Печатаем расстояние в мониторе порта
+  //Serial.print("Расстояние до объекта: "); Serial.print(distance); Serial.println(" см");  
+  curSTorm = getSTorm();
+  if (curDist <= curSTorm) {
+    
+    Serial.print("Длина тормозного пути: "); Serial.print(curSTorm); Serial.print("см ");
+    Serial.print("До объекта: "); Serial.print(curDist); Serial.println("см");
+         
+    setdSonar(1, (200 - (curDist*8)));
+    if (curVector == 'F') {
+        Serial.print("Скорость мотора L: "); Serial.println(motorL.getSpeed());
+        Serial.print("Скорость мотора R: "); Serial.println(motorR.getSpeed());
+        if (oldSpeed == -1)
+          oldSpeed = curSpeed;
 
-  if (distance <= MIN_DISTANCE && curVector == 'F') {
-    Serial.print("До объекта: ");
-    Serial.print(distance);
-    Serial.println("см");
-    if (oldSpeed == -1)
-        oldSpeed = curSpeed;
-    setdSonar(1);
-    if ( curSpeed <= 0) 
-      mStop();
-    else 
-      chgSpeed('<', 10);
+        while (curSpeed > 0) {
+          chgSpeed('<', 50);
+        }
+        mStop();
+        curSpeed = oldSpeed;
+        oldSpeed = -1;
+    }
+    else {
+      if (oldSpeed >= 0 && curSpeed <= 0) {
+        curSpeed = oldSpeed;
+        oldSpeed = -1;
+      }
+    }
   }
   else {
-    setdSonar(0);
-    curSpeed = oldSpeed;
-    oldSpeed = -1;
-  }
+      setdSonar(0, 0);
+ }
 
 }
 
-void setdSonar(int v) {
+
+void setdSonar(int v, int power) {
   if (v == 1) 
-    analogWrite(dSonar, 200);
+    analogWrite(dSonar, power);
   else
     digitalWrite(dSonar, LOW);
+}
+
+void changeSpeed(int v) {
+  Serial.print("Переключить передачу "); Serial.println(v == 1 ? "вверх" : "вниз");
+  switch (v) {
+    case 1 :
+      curSpeed += 50;
+      break;
+    case 0 :
+      curSpeed -= 50;
+      break;
+  }
+  setSpeed();
 }
 
 void loop() {
@@ -204,6 +252,9 @@ void loop() {
       }
       if (str.compareTo("policeturn") == 0) {
         policeTurn(x);
+      }
+      if (str.compareTo("s") == 0 ) {
+        changeSpeed(x);
       }
       
   }
