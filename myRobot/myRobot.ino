@@ -1,5 +1,7 @@
 #include <L298N.h>
 #include <NewPing.h>
+// Подклоючаем библиотеку Servo
+#include <Servo.h> 
 
 //pin definition
 #define ENA 11
@@ -12,17 +14,27 @@
 
 #define PIN_TRIG 6
 #define PIN_ECHO 7
-#define MAX_DISTANCE 300 // Константа для определения максимального расстояния, которое мы будем считать корректным.
+// Пин для сервопривода
+#define PIN_SERVO 5
+
+//constant
+#define MAX_DISTANCE 500 // Константа для определения максимального расстояния, которое мы будем считать корректным.
 #define MIN_DISTANCE 20 
 
-#define DELAY_SONAR 50
+#define DELAY_SONAR 10
 
 #define dSonar 2
 
+// константы скорости
+#define MAX_SPEED 250
+#define MIN_SPEED 80
 
 //create a motorR instance
 L298N motorR(ENA, IN1, IN2);
 L298N motorL(ENB, IN3, IN4);
+
+// Создаем объект
+Servo Servo1;
 
 // Создаем объект, методами которого будем затем пользоваться для получения расстояния.
 // В качестве параметров передаем номера пинов, к которым подключены выходы ECHO и TRIG датчика
@@ -41,11 +53,12 @@ byte index = 0; // Index into array; where to store the character
 int oldSpeed = -1;
 char curVector = '0';
 
-int m = 1; // масса робота 1 кг
+int m = 1.3; // масса робота 1 кг
 int g = 9.8; // ускорение свободного падения
 int sTorm;
 int curDist = 1000; //текушая дистанция
 int curSTorm = 0; // длина тормозного пути
+int enableAIStop = 1;
 
 void setup() {
 
@@ -59,9 +72,7 @@ void setup() {
   digitalWrite(LED, HIGH);
   Serial.setTimeout(10);
   Serial.println("Для вызова инструкции нажмите H");
-
-      Serial.print("0 curSpeed: "); Serial.println(curSpeed);
-      
+  turnServo(0);    
 }
 
 void printHelp() {
@@ -76,7 +87,11 @@ void printHelp() {
    Serial.println("> - увеличить скорость");
    Serial.println("< - уменьшить скорость");
    Serial.println("#delay#[число] - изменить ожидание при повороте");   
+   Serial.println("#changegear#[число] - переключить передачу ( 1 - вверх, 0 - вниз");   
    Serial.println("#policeturn#[число] - полицейский разворот на 180% (1-влево, 0-вправо)");
+   Serial.println("#aistop#[число] - останавливаться перед препятствием (1-включить, 0-отключить)");
+   Serial.println("#getspeed#[число] - получить скорость моторов (0-скорость всех моторов)");
+   Serial.println("#servo#[число] - получить скорость моторов ( -1 - влево, 0 - по центру, 1 - вправо)");
    Serial.println("************************************************");
 }
 
@@ -85,8 +100,15 @@ void setSpeed() {
    motorL.setSpeed(curSpeed);
 }
 
+void getSpeedInfo() {
+  Serial.print("Скорость мотора L: "); Serial.print(motorL.getSpeed());  
+  Serial.print("  "); Serial.print("Скорость мотора R: "); Serial.println(motorR.getSpeed());
+}
+
 void mF() {
-      if ((curDist * 3) <= curSTorm) mStop;
+      if ((curDist * 3) <= curSTorm) {
+        mStop;
+      }
       else {
         setSpeed();
         Serial.println("Motor forward");
@@ -129,7 +151,12 @@ void mTurn(char c) {
 void chgSpeed(char c, int i) {
     int v = i;
     if (c == '<') v *= -1;
-    curSpeed += v;
+    if (curSpeed >= MAX_SPEED && v > 0)
+        curSpeed = MAX_SPEED;
+    else if (curSpeed <= MIN_SPEED && v < 0)
+        curSpeed = MIN_SPEED;  
+    else
+        curSpeed += v;
     Serial.print("curSpeed: ");
     Serial.println(curSpeed);
 }
@@ -171,17 +198,15 @@ void checkSonar() {
   // unsigned int distance = sonar.ping_cm();
   curDist = sonar.ping_cm();
   // Печатаем расстояние в мониторе порта
-  //Serial.print("Расстояние до объекта: "); Serial.print(distance); Serial.println(" см");  
+  //Serial.print("Расстояние до объекта: "); Serial.print(curDist); Serial.println(" см");  
   curSTorm = getSTorm();
   if (curDist <= curSTorm) {
     
-    Serial.print("Длина тормозного пути: "); Serial.print(curSTorm); Serial.print("см ");
-    Serial.print("До объекта: "); Serial.print(curDist); Serial.println("см");
+    //Serial.print("Длина тормозного пути: "); Serial.print(curSTorm); Serial.print("см ");
+    //Serial.print("До объекта: "); Serial.print(curDist); Serial.println("см");
          
-    setdSonar(1, (200 - (curDist*8)));
-    if (curVector == 'F') {
-        Serial.print("Скорость мотора L: "); Serial.println(motorL.getSpeed());
-        Serial.print("Скорость мотора R: "); Serial.println(motorR.getSpeed());
+    setLedSonar(1, (200 - (curDist*8)));
+    if (enableAIStop == 1 && curVector == 'F') {
         if (oldSpeed == -1)
           oldSpeed = curSpeed;
 
@@ -200,30 +225,56 @@ void checkSonar() {
     }
   }
   else {
-      setdSonar(0, 0);
- }
-
+      setLedSonar(0, 0);
+  }
 }
 
 
-void setdSonar(int v, int power) {
+void setLedSonar(int v, int power) {
   if (v == 1) 
     analogWrite(dSonar, power);
   else
     digitalWrite(dSonar, LOW);
 }
 
-void changeSpeed(int v) {
+void changeGear(int v) {
   Serial.print("Переключить передачу "); Serial.println(v == 1 ? "вверх" : "вниз");
   switch (v) {
     case 1 :
       curSpeed += 50;
+      if (curSpeed >= MAX_SPEED) 
+        curSpeed = MAX_SPEED;
       break;
     case 0 :
       curSpeed -= 50;
+      if (curSpeed <= MIN_SPEED)
+        curSpeed = MIN_SPEED;  
       break;
   }
   setSpeed();
+  getSpeedInfo();
+}
+
+void turnServo(int v) {
+  Servo1.attach(PIN_SERVO);
+  String s;
+  int iv = 0;
+  if (v == -1) {
+     iv = 0;
+     s = "вправо";  
+  }
+  else if (v == 1) {
+     iv = 180;   
+     s = "влево";
+  }
+  else if (v == 0) {
+     iv = 90;   
+     s = "центр";
+  }
+  Serial.print("turnServo: "); Serial.print(s);   Serial.print(" ( ");  Serial.print(iv);  Serial.println(" )");  
+  Servo1.write(iv); 
+  delay(500);
+  Servo1.detach();
 }
 
 void loop() {
@@ -237,7 +288,7 @@ void loop() {
     if (val == 'L' || val == 'R') mTurn(val);
     if (val == 'S') mStop();
     if (val == '>' || val == '<') chgSpeed(val, 10);
-    if (val == 'H') printHelp();
+    if (val == 'H' || val == 'h') printHelp();
   }
 
   if(Serial.available() > 0)
@@ -253,8 +304,18 @@ void loop() {
       if (str.compareTo("policeturn") == 0) {
         policeTurn(x);
       }
-      if (str.compareTo("s") == 0 ) {
-        changeSpeed(x);
+      if (str.compareTo("changegear") == 0 ) {
+        changeGear(x);
+      }
+      if (str.compareTo("aistop") == 0 ) {
+        Serial.print("enableAIStop: "); Serial.println(x);
+        enableAIStop = x;
+      }
+      if (str.compareTo("getspeed") == 0 ) {
+        getSpeedInfo();
+      }
+      if (str.compareTo("servo") == 0 ) {
+        turnServo(x);
       }
       
   }
