@@ -21,7 +21,7 @@
 #define MAX_DISTANCE 500 // Константа для определения максимального расстояния, которое мы будем считать корректным.
 #define MIN_DISTANCE 20 
 
-#define DELAY_SONAR 10
+#define DELAY_SONAR 50
 
 #define dSonar 2
 
@@ -43,7 +43,7 @@ NewPing sonar(PIN_TRIG, PIN_ECHO, MAX_DISTANCE);
 
 int val;
 int LED = 13;
-int curSpeed = 80;
+int curSpeed = 180;
 int cnt = 0;
 int curTurnDelay = 200;
 
@@ -53,17 +53,20 @@ byte index = 0; // Index into array; where to store the character
 int oldSpeed = -1;
 char curVector = '0';
 
-int m = 1.3; // масса робота 1 кг
+int m = 2; // масса робота 1 кг
 int g = 9.8; // ускорение свободного падения
 int sTorm;
-int curDist = 1000; //текушая дистанция
+int curDist = 200; //текушая дистанция
 int curSTorm = 0; // длина тормозного пути
 int enableAIStop = 1;
+
+int distance; // переменная "расстояние"
 
 void setup() {
 
   //used for display information
   Serial.begin(9600);
+ 
  
   motorR.setSpeed(curSpeed); // an integer betweENA 0 and 255
   motorL.setSpeed(curSpeed); // an integer betweENA 0 and 255
@@ -189,7 +192,7 @@ void policeTurn(int v) {
 int getSTorm() {
   sTorm = ((curSpeed^2)/(m*g)) *2.5;
   return sTorm;
-}
+} 
 
 void checkSonar() {
   // Стартовая задержка, необходимая для корректной работы.
@@ -198,11 +201,11 @@ void checkSonar() {
   // unsigned int distance = sonar.ping_cm();
   curDist = sonar.ping_cm();
   // Печатаем расстояние в мониторе порта
-  //Serial.print("Расстояние до объекта: "); Serial.print(curDist); Serial.println(" см");  
+// Serial.print("Расстояние до объекта: "); Serial.print(curDist); Serial.println(" см");  
   curSTorm = getSTorm();
-  if (curDist <= curSTorm) {
+  if (curDist < curSTorm) {
     
-    //Serial.print("Длина тормозного пути: "); Serial.print(curSTorm); Serial.print("см ");
+// Serial.print("Длина тормозного пути: "); Serial.print(curSTorm); Serial.print("см ");
     //Serial.print("До объекта: "); Serial.print(curDist); Serial.println("см");
          
     setLedSonar(1, (200 - (curDist*8)));
@@ -210,7 +213,7 @@ void checkSonar() {
         if (oldSpeed == -1)
           oldSpeed = curSpeed;
 
-        while (curSpeed > 0) {
+        while (curSpeed > MIN_SPEED) {
           chgSpeed('<', 50);
         }
         mStop();
@@ -280,6 +283,8 @@ void turnServo(int v) {
 void loop() {
   
   checkSonar();
+
+  
   if (Serial.available())
   {
     val = Serial.read();
